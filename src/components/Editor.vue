@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { watch } from 'vue';
-import { QuillEditor } from 'vue-quill-next';
+import { QuillEditor, Quill } from 'vue-quill-next';
 import QuillCursors from 'quill-cursors';
 import type Delta from 'quill-delta';
 import { useUsersStore, type CursorRange } from '../stores/users';
@@ -18,61 +18,70 @@ const modules = {
   module: QuillCursors,
 };
 
-function onReady(quill: any) {
-  const cursors = quill.getModule('cursors') as QuillCursors;
-  usersStore.register(props.userName);
+let quillRef: Quill;
+let cursorsRef: QuillCursors;
 
-  quill.on('selection-change', (range: CursorRange, _old: CursorRange, source: string) => {
-    if (source !== 'user') return;
-    usersStore.setCursor(props.userName, range);
-  });
-
-  quill.on('text-change', (delta: Delta, _old: Delta, source: string) => {
-    if (source !== 'user') return;
-    documentStore.publish(props.userName, delta);
-    usersStore.setCursor(props.userName, quill.getSelection());
-  });
-
-  let applied = 0;
-  watch(
-    () => documentStore.ops.length,
-    (len) => {
-      while (applied < len) {
-        const op = documentStore.ops[applied++];
-        if (op.origin !== props.userName) {
-          quill.updateContents(op.delta, 'silent');
-        }
-      }
-    },
-    { immediate: true },
-  );
-
-  // Cursors createCursor is not idempotent
-  const seen = new Set<string>();
-  watch(
-    () => usersStore.users,
-    (users) => {
-      for (const userName in users) {
-        if (userName === props.userName) continue;
-        const user = users[userName];
-        const prev = seen.has(userName);
-        if (!prev) {
-          cursors.createCursor(userName, userName, user.color);
-        }
-        if (user.range) {
-          cursors.moveCursor(userName, user.range);
-        }
-      }
-    },
-    { deep: true, immediate: true },
-  );
+function onTextChange({ delta, source }: { delta: Delta; oldContents: Delta; source: string }) {
+  if (source !== 'user') return;
+  documentStore.publish(props.userName, delta);
+  usersStore.setCursor(props.userName, quillRef.getSelection());
 }
+
+function onSelectionChange({ range, source }: { range: CursorRange; oldRange: CursorRange; source: string }) {
+  if (source !== 'user') return;
+  usersStore.setCursor(props.userName, range);
+}
+
+function onReady(quill: Quill) {
+  quillRef = quill;
+  cursorsRef = quill.getModule('cursors') as QuillCursors;
+  usersStore.register(props.userName);
+}
+
+let applied = 0;
+watch(
+  () => documentStore.ops.length,
+  (len) => {
+    while (applied < len) {
+      const op = documentStore.ops[applied++];
+      if (op.origin !== props.userName) {
+        quillRef.updateContents(op.delta, 'silent');
+      }
+    }
+  },
+  { immediate: true },
+);
+
+// Cursors createCursor is not idempotent
+const seen = new Set<string>();
+watch(
+  () => usersStore.users,
+  (users) => {
+    for (const userName in users) {
+      if (userName === props.userName) continue;
+      const user = users[userName];
+      const prev = seen.has(userName);
+      if (!prev) {
+        cursorsRef.createCursor(userName, userName, user.color);
+      }
+      if (user.range) {
+        cursorsRef.moveCursor(userName, user.range);
+      }
+    }
+  },
+  { deep: true, immediate: true },
+);
 </script>
 
 <template>
   <div class="flex-1">
     <div class="text-lg font-bold">{{ props.userName }}</div>
-    <QuillEditor :modules="modules" theme="snow" @ready="onReady" />
+    <QuillEditor
+        :modules="modules"
+        theme="snow"
+        @ready="onReady"
+        @text-change="onTextChange"
+        @selection-change="onSelectionChange"/>
   </div>
 </template>
 
